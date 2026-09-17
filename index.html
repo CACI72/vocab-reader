@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="生字導讀">
+<title>生字詞彙閱讀輔助</title>
+<style>
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+    background: #f8fafc;
+    color: #1e293b;
+    font-family: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    /* 關閉雙擊縮放，避免學生連點按鈕時畫面被放大 */
+    touch-action: manipulation;
+  }
+  main { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: 1.5rem; margin: 0; text-align: center; }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+  .filters label { display: flex; align-items: center; gap: 8px; font-size: 1.125rem; font-weight: 600; }
+  select {
+    min-height: 44px; min-width: 7em; padding: 0 12px;
+    font-size: 1.125rem; border: 2px solid #94a3b8; border-radius: 10px; background: #fff; color: #1e293b;
+  }
+
+  .card {
+    background: #fff; border-radius: 20px;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, .08);
+    min-height: 220px; padding: 24px 16px;
+    display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+    transition: box-shadow .3s;
+  }
+  .card.speaking-glow { animation: glow 1.6s ease-in-out infinite; }
+  @keyframes glow {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(37, 99, 235, .25), 0 4px 16px rgba(15, 23, 42, .08); }
+    50%      { box-shadow: 0 0 0 14px rgba(37, 99, 235, .12), 0 4px 16px rgba(15, 23, 42, .08); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card.speaking-glow { animation: none; box-shadow: 0 0 0 6px rgba(37, 99, 235, .35); }
+  }
+  ruby { ruby-position: over; font-size: 3.5rem; font-weight: 700; color: #1e293b; margin: 0 .08em; }
+  rt { font-size: 1.25rem; font-weight: 500; color: #334155; }
+  .empty { font-size: 1.5rem; font-weight: 600; color: #475569; text-align: center; }
+
+  .controls { display: flex; gap: 12px; justify-content: center; align-items: center; flex-wrap: wrap; }
+  button {
+    min-height: 56px; min-width: 56px; padding: 0 20px;
+    font-size: 1.25rem; font-weight: 700; border: 0; border-radius: 14px;
+    background: #2563eb; color: #fff; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #1d4ed8; }
+  button:disabled { background: #cbd5e1; color: #64748b; cursor: not-allowed; }
+  button:focus-visible, select:focus-visible { outline: 4px solid #f59e0b; outline-offset: 2px; }
+  #speak { min-width: 140px; background: #047857; }
+  #speak:hover:not(:disabled) { background: #065f46; }
+  #counter { font-size: 1.25rem; font-weight: 700; text-align: center; margin: 0; }
+
+  .pills {
+    display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+    /* 詞量大時限制高度，避免序號按鈕淹沒畫面 */
+    max-height: 132px; overflow-y: auto; padding: 4px;
+  }
+  .pills button {
+    min-height: 44px; min-width: 44px; padding: 0 10px; font-size: 1rem;
+    border-radius: 999px; background: #e2e8f0; color: #1e293b;
+  }
+  .pills button:hover { background: #cbd5e1; }
+  .pills button[aria-current="true"] { background: #2563eb; color: #fff; }
+
+  #status { font-size: .875rem; color: #64748b; text-align: center; min-height: 1.2em; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>生字詞彙閱讀輔助</h1>
+
+  <div class="filters">
+    <label>首音 <select id="initial"></select></label>
+    <label>字數
+      <select id="length">
+        <option value="all">不限字數</option>
+        <option value="1">一字</option>
+        <option value="2">二字詞</option>
+        <option value="3">三字詞</option>
+        <option value="4">四字詞</option>
+      </select>
+    </label>
+    <label>語速
+      <select id="rate">
+        <option value="0.6">慢速</option>
+        <option value="0.8" selected>標準教學</option>
+        <option value="1">一般語速</option>
+      </select>
+    </label>
+  </div>
+
+  <div id="card" class="card" aria-live="polite"></div>
+
+  <p id="counter" aria-live="polite"></p>
+
+  <div class="controls">
+    <button id="prev" type="button" aria-label="上一個詞">◀ 上一個</button>
+    <button id="speak" type="button" aria-label="朗讀這個詞">🔊 朗讀</button>
+    <button id="next" type="button" aria-label="下一個詞">下一個 ▶</button>
+  </div>
+
+  <nav id="pills" class="pills" aria-label="跳到第幾個詞"></nav>
+
+  <p id="status" role="status"></p>
+</main>
+
+<script>
+'use strict';
+
+// 部署 Code.gs 後，把網頁應用程式網址貼在這裡；留空則只使用內建範例詞庫
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzPskH5Xsp8mzp-YB5Bdp9TN4wusvSlbtbalYCA4-q2Y08KJrHDAXYtItH6s5chuNdo/exec';
+
+const CACHE_KEY = 'vocab_cache';
+const FETCH_TIMEOUT_MS = 10000;
+
+// 首次開啟且離線時的備援詞庫
+const SAMPLE_DATA = [
+  { initial: 'ㄅ', word: '爸爸', len: 2, ruby: [{ char: '爸', zhuyin: 'ㄅㄚˋ' }, { char: '爸', zhuyin: '˙ㄅㄚ' }] },
+  { initial: 'ㄅ', word: '八', len: 1, ruby: [{ char: '八', zhuyin: 'ㄅㄚ' }] },
+  { initial: 'ㄇ', word: '媽媽', len: 2, ruby: [{ char: '媽', zhuyin: 'ㄇㄚ' }, { char: '媽', zhuyin: '˙ㄇㄚ' }] },
+  { initial: 'ㄑ', word: '氣球', len: 2, ruby: [{ char: '氣', zhuyin: 'ㄑㄧˋ' }, { char: '球', zhuyin: 'ㄑㄧㄡˊ' }] },
+  { initial: 'ㄑ', word: '七手八腳', len: 4, ruby: [{ char: '七', zhuyin: 'ㄑㄧ' }, { char: '手', zhuyin: 'ㄕㄡˇ' }, { char: '八', zhuyin: 'ㄅㄚ' }, { char: '腳', zhuyin: 'ㄐㄧㄠˇ' }] },
+  { initial: 'ㄔ', word: '長頸鹿', len: 3, ruby: [{ char: '長', zhuyin: 'ㄔㄤˊ' }, { char: '頸', zhuyin: 'ㄐㄧㄥˇ' }, { char: '鹿', zhuyin: 'ㄌㄨˋ' }] },
+  { initial: 'ㄧ', word: '一', len: 1, ruby: [{ char: '一', zhuyin: 'ㄧ' }] },
+  { initial: 'ㄨ', word: '烏鴉', len: 2, ruby: [{ char: '烏', zhuyin: 'ㄨ' }, { char: '鴉', zhuyin: 'ㄧㄚ' }] },
+];
+
+const $ = id => document.getElementById(id);
+const el = {
+  initial: $('initial'), length: $('length'), rate: $('rate'),
+  card: $('card'), counter: $('counter'),
+  prev: $('prev'), speak: $('speak'), next: $('next'),
+  pills: $('pills'), status: $('status'),
+};
+
+const state = { data: [], list: [], index: 0 };
+const synth = window.speechSynthesis;
+let twVoice = null;
+
+function isValidData(d) {
+  return Array.isArray(d) && d.every(it =>
+    it && typeof it.word === 'string' && typeof it.initial === 'string' &&
+    typeof it.len === 'number' && Array.isArray(it.ruby));
+}
+
+function readCache() {
+  try {
+    const d = JSON.parse(localStorage.getItem(CACHE_KEY));
+    return isValidData(d) ? d : null;
+  } catch (e) { return null; }
+}
+
+function writeCache(d) {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(d)); } catch (e) { /* 私密瀏覽或空間不足時僅略過快取 */ }
+}
+
+function buildInitialOptions() {
+  const current = el.initial.value || 'all';
+  // 注音符號在 Unicode 中即依ㄅㄆㄇㄈ順序排列，直接排序即可
+  const initials = [...new Set(state.data.map(it => it.initial))].sort();
+  el.initial.replaceChildren(new Option('全部', 'all'), ...initials.map(s => new Option(s, s)));
+  el.initial.value = initials.includes(current) ? current : 'all';
+}
+
+function applyFilter() {
+  const ini = el.initial.value;
+  const len = el.length.value;
+  state.list = state.data.filter(it =>
+    (ini === 'all' || it.initial === ini) &&
+    (len === 'all' || it.len === Number(len)));
+}
+
+// 資料更新時保留學生目前看的詞，避免畫面突然跳回第一個
+function setData(data) {
+  const currentWord = state.list[state.index] && state.list[state.index].word;
+  state.data = data;
+  buildInitialOptions();
+  applyFilter();
+  const found = state.list.findIndex(it => it.word === currentWord);
+  state.index = found >= 0 ? found : 0;
+  if (found < 0) stopSpeech();
+  render();
+}
+
+function render() {
+  const total = state.list.length;
+  const item = state.list[state.index];
+
+  if (!item) {
+    const msg = document.createElement('p');
+    msg.className = 'empty';
+    msg.textContent = '查無符合條件之生字詞';
+    el.card.replaceChildren(msg);
+    el.counter.textContent = '';
+    el.pills.replaceChildren();
+    el.prev.disabled = el.next.disabled = el.speak.disabled = true;
+    return;
+  }
+
+  el.card.replaceChildren(...item.ruby.map(r => {
+    const ruby = document.createElement('ruby');
+    const rt = document.createElement('rt');
+    ruby.textContent = r.char;
+    rt.textContent = r.zhuyin;
+    ruby.appendChild(rt);
+    return ruby;
+  }));
+  el.card.setAttribute('aria-label', item.word);
+
+  el.counter.textContent = `第 ${state.index + 1} / ${total} 詞`;
+  el.prev.disabled = state.index === 0;
+  el.next.disabled = state.index === total - 1;
+  el.speak.disabled = !synth;
+
+  el.pills.replaceChildren(...state.list.map((it, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = i + 1;
+    b.setAttribute('aria-label', `第 ${i + 1} 個詞`);
+    b.setAttribute('aria-current', String(i === state.index));
+    b.addEventListener('click', () => goTo(i));
+    return b;
+  }));
+  const active = el.pills.children[state.index];
+  if (active) active.scrollIntoView({ block: 'nearest' });
+}
+
+function goTo(i) {
+  if (i < 0 || i >= state.list.length || i === state.index) return;
+  stopSpeech();
+  state.index = i;
+  render();
+}
+
+function stopSpeech() {
+  if (synth) synth.cancel();
+  // cancel() 後部分瀏覽器不會觸發 onend，光暈需主動移除
+  el.card.classList.remove('speaking-glow');
+}
+
+function pickVoice() {
+  if (!synth) return;
+  const voices = synth.getVoices();
+  twVoice = voices.find(v => v.lang.replace('_', '-').toLowerCase() === 'zh-tw') || null;
+  if (voices.length && !twVoice) {
+    el.status.textContent = '此裝置找不到臺灣中文語音，發音可能不正確，請洽老師設定。';
+  }
+}
+
+function speak() {
+  const item = state.list[state.index];
+  if (!item || !synth) return;
+  stopSpeech();
+  const u = new SpeechSynthesisUtterance(item.word);
+  u.lang = 'zh-TW';
+  if (twVoice) u.voice = twVoice;
+  u.rate = Number(el.rate.value);
+  u.onstart = () => el.card.classList.add('speaking-glow');
+  u.onend = u.onerror = () => el.card.classList.remove('speaking-glow');
+  synth.speak(u);
+}
+
+async function syncFromCloud() {
+  if (!GAS_API_URL) return;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(GAS_API_URL, { signal: ctrl.signal });
+    const body = await res.json();
+    if (!isValidData(body.items)) throw new Error('資料格式不符');
+    if (body.errors && body.errors.length) {
+      console.warn('試算表有格式錯誤的列：', body.errors);
+    }
+    if (JSON.stringify(body.items) !== JSON.stringify(state.data)) {
+      writeCache(body.items);
+      setData(body.items);
+    }
+    el.status.textContent = '';
+  } catch (e) {
+    el.status.textContent = '目前無法連線，使用上次儲存的詞庫。';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+el.initial.addEventListener('change', () => { stopSpeech(); applyFilter(); state.index = 0; render(); });
+el.length.addEventListener('change', () => { stopSpeech(); applyFilter(); state.index = 0; render(); });
+el.prev.addEventListener('click', () => goTo(state.index - 1));
+el.next.addEventListener('click', () => goTo(state.index + 1));
+el.speak.addEventListener('click', speak);
+
+// 觸控或滑鼠點按後移除按鈕焦點，讓外接開關送出的空白鍵一律觸發朗讀，而不是重按剛才那顆按鈕
+document.querySelectorAll('.controls button').forEach(b =>
+  b.addEventListener('click', e => { if (e.detail > 0) b.blur(); }));
+el.pills.addEventListener('click', e => { if (e.detail > 0 && e.target.blur) e.target.blur(); });
+
+document.addEventListener('keydown', e => {
+  const tag = e.target.tagName;
+  // 在選單上操作時，方向鍵與 Enter 交給選單本身
+  if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); goTo(state.index - 1); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); goTo(state.index + 1); }
+  else if (e.key === ' ' || e.key === 'Enter') {
+    // 用 Tab 移到按鈕上的鍵盤使用者，保留按鈕原本的行為
+    if (tag === 'BUTTON') return;
+    e.preventDefault();
+    if (!e.repeat) speak();
+  }
+});
+
+if (synth) {
+  pickVoice();
+  synth.addEventListener('voiceschanged', pickVoice);
+} else {
+  el.status.textContent = '此瀏覽器不支援語音朗讀。';
+}
+
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+setData(readCache() || SAMPLE_DATA);
+syncFromCloud();
+</script>
+</body>
+</html>
