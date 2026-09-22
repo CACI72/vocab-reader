@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""build_contact_book 的回歸測試。
+
+重點是第三項：證明 schema 檢查能攔下「把元素 append 到 w:tblPr 尾端」
+這個 bug——它就是 2026-09-22 產出無法開啟的同一類成因，而且檔案大小
+與 ZIP 結構都正常，光看這兩者驗不出來。
+
+執行：python3 test_build.py
+"""
+
+import json
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+from docx import Document
+from docx.oxml.ns import qn
+
+sys.path.insert(0, str(Path(__file__).parent))
+import build_contact_book as B  # noqa: E402
+
+
+def _sample():
+    return json.loads((Path(__file__).parent / "entries.example.json").read_text("utf-8"))
+
+
+def test_full_sheet_passes():
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "a.docx"
+        B.build(_sample(), out)
+        problems = B.verify(out)
+        assert problems == [], problems
+        assert zipfile.ZipFile(out).testzip() is None
+    print("✓ 8 格完整表格：ZIP、schema、尺寸皆通過")
+
+
+def test_partial_sheet_keeps_eight_cells():
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "b.docx"
+        B.build(_sample()[:3], out)
+        assert B.verify(out) == []
+        t = Document(out).tables[0]
+        assert len(t.rows) * len(t.columns) == 8
+        assert t.cell(0, 0).text.startswith("S01今日表現：")
+        assert t.cell(3, 1).text.strip() == ""      # 未填格留白
+    print("✓ 僅 3 筆輸入：仍輸出 8 格，未填格留白")
+
+
+def test_schema_checker_catches_appended_element():
+    """把 tblCellMar append 到尾端（原始 bug），檢查器必須抓到。"""
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "c.docx"
+        B.build(_sample(), out)
+
+        doc = Document(out)
+        tbl_pr = doc.tables[0]._tbl.tblPr
+        stray = tbl_pr.makeelement(qn("w:tblCellMar"), {})   # 已存在 → 重複 + 順序錯
+        tbl_pr.append(stray)                                  # 排在 tblLook 之後
+        doc.save(out)
+
+        assert zipfile.ZipFile(out).testzip() is None, "ZIP 仍完整——正是難以察覺之處"
+        problems = B.verify(out)
+        assert any("順序" in p or "重複" in p for p in problems), problems
+    print("✓ 回歸防護：append 到 w:tblPr 尾端會被 schema 檢查攔下")
+    print(f"    攔下訊息：{problems[0]}")
+
+
+def test_overlength_warns_but_still_builds():
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "e.docx"
+        warnings = B.build([{"label": "S01", "text": "字" * 300}], out)
+        assert warnings and "超出" in warnings[0]
+        assert B.verify(out) == []
+    print("✓ 超長內容：發出篇幅警告，檔案本身仍有效")
+
+
+if __name__ == "__main__":
+    for fn in (
+        test_full_sheet_passes,
+        test_partial_sheet_keeps_eight_cells,
+        test_schema_checker_catches_appended_element,
+        test_overlength_warns_but_still_builds,
+    ):
+        fn()
+    print("\n全部通過。")
