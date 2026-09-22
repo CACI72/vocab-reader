@@ -23,7 +23,8 @@ import build_contact_book as B  # noqa: E402
 
 
 def _sample():
-    return json.loads((Path(__file__).parent / "entries.example.json").read_text("utf-8"))
+    sample = Path(__file__).resolve().parent.parent / "references" / "entries.example.json"
+    return json.loads(sample.read_text("utf-8"))
 
 
 def test_full_sheet_passes():
