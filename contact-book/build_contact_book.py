@@ -7,7 +7,7 @@ build_contact_book.py — 家庭聯絡簿「教師叮嚀」欄列印表格產生
 ----
 把每日各生的「教師叮嚀」欄文字，排成可直接列印、裁切後黏貼於紙本
 「家庭聯絡暨學習紀錄」的表格：2 欄 × 4 列（共 8 格），每格精確
-9cm × 5cm，字體標楷體 14pt。
+8.5cm × 5cm，字體標楷體 14pt。
 
 設計原則（回應 2026-09-22 兩次 session 的失效檢討）
 ------------------------------------------------
@@ -16,6 +16,7 @@ build_contact_book.py — 家庭聯絡簿「教師叮嚀」欄列印表格產生
    損毀、檔案大小卻吻合的靜默失敗（Word 無法開啟）。
 2. 版面參數集中在 LAYOUT，不再每次重新推導。
 3. 產出後自我驗證（ZIP 結構 + OOXML schema 順序 + 欄寬列高），驗證失敗即非零離開。
+4. 產出前檢查逐格獨立性：每格須能脫離其他格獨立閱讀（見 check_independence）。
 
 用法
 ----
@@ -50,7 +51,7 @@ from docx.shared import Cm, Pt
 LAYOUT = {
     "cols": 2,
     "rows": 4,
-    "cell_w_cm": 9.0,        # 對應紙本教師叮嚀欄寬
+    "cell_w_cm": 8.5,        # 對應紙本教師叮嚀欄寬（2026-09-22 由 9.0 調整）
     "cell_h_cm": 5.0,        # 對應紙本教師叮嚀欄高
     "font": "標楷體",
     "font_size_pt": 14,
@@ -65,7 +66,7 @@ CELLS = LAYOUT["cols"] * LAYOUT["rows"]
 # 5cm 列高扣掉上下內距後的可用高度，除以行高 → 可容行數
 _USABLE_H_PT = (LAYOUT["cell_h_cm"] - 2 * LAYOUT["cell_margin_cm"]) * 28.3465
 MAX_LINES = int(_USABLE_H_PT // LAYOUT["line_spacing_pt"])
-# 9cm 扣掉左右內距，除以全形字寬（= 字級）→ 每行可容全形字數
+# 欄寬扣掉左右內距，除以全形字寬（= 字級）→ 每行可容全形字數
 CHARS_PER_LINE = int(
     ((LAYOUT["cell_w_cm"] - 2 * LAYOUT["cell_margin_cm"]) * 28.3465)
     // LAYOUT["font_size_pt"]
@@ -171,6 +172,54 @@ def build(entries, out_path):
     return warnings
 
 
+# ── 逐格獨立性檢查 ──────────────────────────────────────────────
+# 每位學生的聯絡簿是**獨立交付給該生家長**的一格，家長看不到其他格。
+# 因此內容不得依賴其他格才能讀懂，也不得把該生與同學相互比較。
+# 例：「同樣不太喜歡拔草工作」——「同樣」指涉的是前一格另一位學生的
+# 敘述，該生家長讀到時無從得知在跟誰「同樣」。
+
+# 明確的跨生指涉：一律視為錯誤，必須改寫
+CROSS_REF_PATTERNS = [
+    (r"同樣", "「同樣」指涉其他學生的敘述"),
+    (r"(?:跟|和|與|同)[^，。；！？\n]{0,8}一樣", "與他人相比的句型"),
+    (r"其他同學|別的同學|其餘同學|其他學生|同儕之中", "直接提及其他學生"),
+    (r"相較|相比|比起", "比較句型"),
+    (r"比[^，。；！？\n]{0,8}[更還]", "比較句型"),
+    (r"全班(?:最|第)", "與全班相比"),
+]
+
+# 需人工確認的比較語：可能只描述該生自身偏好（如「最喜歡畫畫」），
+# 也可能隱含與同學比較（如「表現最為積極」），故僅提示不阻擋
+COMPARATIVE_HINTS = [
+    (r"最為", "「最為」多半隱含與他人比較"),
+    (r"最(?!後|近|初|終|為)", "最高級用語，請確認未與同學比較"),
+]
+
+
+def check_independence(entries):
+    """檢查各格內容是否能脫離其他格獨立閱讀。
+
+    回傳 (errors, hints)。errors 為明確跨生指涉，應阻擋輸出；
+    hints 為需人工判斷的比較語，僅提示。
+    """
+    import re
+
+    errors, hints = [], []
+    for idx, entry in enumerate(entries, start=1):
+        text = str(entry.get("text", ""))
+        label = str(entry.get("label", "")).strip() or f"第 {idx} 筆"
+
+        for pattern, why in CROSS_REF_PATTERNS:
+            for m in re.finditer(pattern, text):
+                errors.append(f"{label}：「{m.group()}」— {why}")
+
+        for pattern, why in COMPARATIVE_HINTS:
+            for m in re.finditer(pattern, text):
+                hints.append(f"{label}：「{m.group()}」— {why}")
+
+    return errors, hints
+
+
 # w:tblPr 的合法子元素順序（ECMA-376 CT_TblPrBase 序列）
 TBLPR_ORDER = [
     "tblStyle", "tblpPr", "tblOverlap", "bidiVisual", "tblStyleRowBandSize",
@@ -261,6 +310,15 @@ def main():
     if not isinstance(data, list):
         sys.exit("entries JSON 最外層必須是陣列")
 
+    errors, hints = check_independence(data)
+    if errors:
+        print("✗ 逐格獨立性檢查未通過：", file=sys.stderr)
+        for e in errors:
+            print(f"  {e}", file=sys.stderr)
+        print("\n每格都是獨立交付給該生家長的，家長看不到其他格。", file=sys.stderr)
+        print("請改寫上列敘述，使該格單獨閱讀即可理解，再重新執行。", file=sys.stderr)
+        sys.exit(1)
+
     out = Path(args.out)
     warnings = build(data, out)
 
@@ -281,6 +339,10 @@ def main():
         print("\n⚠ 篇幅提醒：")
         for w in warnings:
             print(w)
+    if hints:
+        print("\n⚠ 比較語提醒（請確認未與同學比較）：")
+        for h in hints:
+            print(f"  {h}")
 
 
 if __name__ == "__main__":

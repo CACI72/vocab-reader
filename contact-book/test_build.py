@@ -67,6 +67,60 @@ def test_schema_checker_catches_appended_element():
     print(f"    攔下訊息：{problems[0]}")
 
 
+def test_independence_blocks_cross_reference():
+    """重現 2026-09-22 的實際問題：「同樣不太喜歡拔草工作」。
+
+    「同樣」指涉的是另一格學生的敘述；該生家長只會收到自己孩子那一格，
+    讀到時無從得知在跟誰「同樣」。這類敘述必須在產出前被攔下。
+    """
+    errors, _ = B.check_independence([
+        {"label": "S05", "text": "今日課程為柚子娃娃製作。同樣不太喜歡拔草工作，但態度認真。"},
+    ])
+    assert len(errors) == 1 and "同樣" in errors[0], errors
+    print("✓ 逐格獨立性：跨生指涉「同樣」被攔下")
+
+
+def test_independence_flags_other_cross_ref_forms():
+    cases = ["跟同學一樣喜歡畫畫", "其他同學都完成了", "相較之下更專注", "比同學更快完成"]
+    for text in cases:
+        errors, _ = B.check_independence([{"label": "S01", "text": text}])
+        assert errors, f"未攔下：{text}"
+    print(f"✓ 逐格獨立性：另外 {len(cases)} 種跨生句型皆被攔下")
+
+
+def test_independence_allows_clean_text():
+    """正常敘述不得誤判——提及「同學協助」是描述支持方式，非跨格指涉。"""
+    errors, hints = B.check_independence(_sample())
+    assert errors == [], errors
+    errors2, _ = B.check_independence([
+        {"label": "S06", "text": "生活課練習擦桌子，在老師與同學協助下順利完成整理工作。"},
+    ])
+    assert errors2 == [], errors2
+    print("✓ 逐格獨立性：範例檔與「同學協助」等正常敘述無誤判")
+
+
+def test_independence_hints_are_advisory():
+    """比較語只提示、不阻擋，因為可能只是描述該生自身偏好。"""
+    errors, hints = B.check_independence([
+        {"label": "S02", "text": "園藝課表現最為積極。"},
+    ])
+    assert errors == []
+    assert len(hints) == 1 and "最為" in hints[0], hints
+    print("✓ 逐格獨立性：比較語僅提示，且不重複計數")
+
+
+def test_cell_width_is_8_5cm():
+    from docx.shared import Cm
+    assert B.LAYOUT["cell_w_cm"] == 8.5
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "w.docx"
+        B.build(_sample(), out)
+        assert B.verify(out) == []
+        t = Document(out).tables[0]
+        assert abs(t.columns[0].width - Cm(8.5)) <= Cm(0.01)
+    print(f"✓ 版面：每格 8.5cm × 5.0cm，單格容量 {B.MAX_CHARS} 字")
+
+
 def test_overlength_warns_but_still_builds():
     with tempfile.TemporaryDirectory() as d:
         out = Path(d) / "e.docx"
@@ -81,6 +135,11 @@ if __name__ == "__main__":
         test_full_sheet_passes,
         test_partial_sheet_keeps_eight_cells,
         test_schema_checker_catches_appended_element,
+        test_independence_blocks_cross_reference,
+        test_independence_flags_other_cross_ref_forms,
+        test_independence_allows_clean_text,
+        test_independence_hints_are_advisory,
+        test_cell_width_is_8_5cm,
         test_overlength_warns_but_still_builds,
     ):
         fn()
